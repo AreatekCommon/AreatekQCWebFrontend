@@ -1,0 +1,54 @@
+# Dependencies
+node_modules/
+
+# Production build
+dist/
+dist-ssr/
+
+# Vite cache
+.vite/
+
+# Environment files and local overrides
+.env
+.env.*
+!.env.example
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Tests and coverage
+coverage/
+.nyc_output/
+*.lcov
+
+# TypeScript incremental-build cache
+*.tsbuildinfo
+
+# ESLint / Stylelint cache
+.eslintcache
+.stylelintcache
+
+# IDE / editor
+.vscode/*
+!.vscode/extensions.json
+!.vscode/settings.json
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.swp
+*.swo
+*~
+
+# OS-generated files
+.DS_Store
+Thumbs.db
+Desktop.ini
