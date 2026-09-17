@@ -10,15 +10,22 @@ export type TranslationSchema = {
         saveProject: string;
         saveAs: string;
         loadProject: string;
+        createProject: string;
         namePrompt: string;
         overwriteConfirm: string;
         saveSuccess: string;
         saveError: string;
+        createSuccess: string;
+        createError: string;
         nameRequired: string;
+        trajectoryRequired: string;
+        noTrajectories: string;
+        noActiveProject: string;
         settingsUnavailable: string;
         sectionTitle: string;
         selectProject: string;
         selectProjectLabel: string;
+        selectTrajectoryLabel: string;
         noProject: string;
         nameField: string;
         loadSuccess: string;
@@ -26,6 +33,15 @@ export type TranslationSchema = {
         unloadSuccess: string;
         overwriteConfirmAction: string;
         overwriteCancel: string;
+        deleteProject: string;
+        renameProject: string;
+        deleteConfirm: string;
+        deleteTrajectoryCheckbox: string;
+        deleteSuccess: string;
+        deleteError: string;
+        renameSuccess: string;
+        renameError: string;
+        renameRequired: string;
     };
     nav: {
         dashboard: string;
@@ -200,6 +216,7 @@ export type TranslationSchema = {
                 scanTargetExclusiveHint: string;
                 markersOnlyAlignHint: string;
                 markersOnlySaveTypeHint: string;
+                markersOnlyExportRootHint: string;
                 markerRadiusResolutionHint: string;
                 scanObj: string;
                 autoCutFace: string;
@@ -305,6 +322,7 @@ export type TranslationSchema = {
         pointInUseCannotDelete: string;
         selectError: string;
         lockedWhileRunning: string;
+        projectRequiredHint: string;
         noFiles: string;
         pathsFolder: string;
         saveFolder: string;

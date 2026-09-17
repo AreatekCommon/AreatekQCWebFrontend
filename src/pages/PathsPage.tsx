@@ -1,8 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-    copyPath,
-    createPath,
-    deletePath,
     fetchActivePath,
     fetchAxis,
     fetchPaths,
@@ -11,10 +8,8 @@ import {
     isLocalApiServer,
     moveToPathPosition,
     pickServerFolder,
-    renamePath,
     saveActivePath,
     saveSettingsSection,
-    selectPath,
 } from "../api/client";
 import { defaultRuntimeSettings } from "../constants/scannerDefaults";
 import { applyNodeInspectorChange, NodeInspector } from "../components/NodeInspector";
@@ -26,6 +21,7 @@ import { usePathEditorHistory, type PathEditorSnapshot } from "../hooks/usePathE
 import { useI18n } from "../i18n/useI18n";
 import { useProjectSaveRegistry } from "../project/ProjectSaveContext";
 import type {
+    PathDocument,
     PathNode,
     PathPoint,
     PathTravelStep,
@@ -34,10 +30,7 @@ import type {
     RuntimeSettings,
 } from "../types/api";
 import {
-    buildCopyTargetStem,
-    ensureJsonExtension,
     formatPathDisplayName,
-    validatePathBasename,
 } from "../utils/pathFilenames";
 import { SETTINGS_SECTION_PATHS } from "../utils/settingsSections";
 import { normalizeIdSafeRoutes } from "../utils/positionIds";
@@ -84,7 +77,8 @@ function seedScanNodesExposure(
 
 export function PathsPage() {
     const { t } = useI18n();
-    const { registerPathDocumentGetter, registerProjectReloadListener } = useProjectSaveRegistry();
+    const { activeProjectName, registerPathDocumentGetter, registerProjectReloadListener } =
+        useProjectSaveRegistry();
     const history = usePathEditorHistory();
     const clearHistoryRef = useRef(history.clear);
     clearHistoryRef.current = history.clear;
@@ -92,6 +86,7 @@ export function PathsPage() {
     const historyApplyingRef = useRef(false);
     const autosaveTimerRef = useRef<number | null>(null);
     const autosavePendingRef = useRef(false);
+    const lastTouchUpPointIdRef = useRef<string | null>(null);
 
     const [pathsList, setPathsList] = useState<PathsListResponse | null>(null);
     const [points, setPoints] = useState<PathPoint[]>([]);
@@ -106,20 +101,9 @@ export function PathsPage() {
     const [loading, setLoading] = useState(true);
     const [reloading, setReloading] = useState(false);
     const [saving, setSaving] = useState(false);
-    const [selecting, setSelecting] = useState(false);
-    const [copying, setCopying] = useState(false);
-    const [deleting, setDeleting] = useState(false);
-    const [renaming, setRenaming] = useState(false);
-    const [creating, setCreating] = useState(false);
     const [savingFolder, setSavingFolder] = useState(false);
     const [pickingFolder, setPickingFolder] = useState(false);
     const [pathsFolderInput, setPathsFolderInput] = useState("");
-    const [newFileName, setNewFileName] = useState("new_path");
-    const [copyFileName, setCopyFileName] = useState("");
-    const [newFileNameError, setNewFileNameError] = useState<string | null>(null);
-    const [copyFileNameError, setCopyFileNameError] = useState<string | null>(null);
-    const [renameFileName, setRenameFileName] = useState("");
-    const [renameFileNameError, setRenameFileNameError] = useState<string | null>(null);
     const [runtimeSettings, setRuntimeSettings] = useState<RuntimeSettings>(defaultRuntimeSettings);
     const [perPointExposure, setPerPointExposure] = useState(false);
     const [perPointMarkerExposure, setPerPointMarkerExposure] = useState(false);
@@ -250,7 +234,7 @@ export function PathsPage() {
     }, []);
 
     const persistDocument = useCallback(
-        async (options: { silent?: boolean } = {}) => {
+        async (options: { silent?: boolean; document?: PathDocument } = {}) => {
             if (isLocked || hasValidationErrors()) {
                 return false;
             }
@@ -262,7 +246,7 @@ export function PathsPage() {
                 if (!options.silent) {
                     setSuccess(null);
                 }
-                const document = buildCurrentDocument();
+                const document = options.document ?? buildCurrentDocument();
                 const previousSelectedNodeId = selectedNodeId;
                 const data = await saveActivePath(document);
                 applyActivePath(data);
@@ -378,14 +362,6 @@ export function PathsPage() {
     }, [loadPipelineStatus]);
 
     useEffect(() => {
-        const activeFile = pathsList?.active_file;
-        if (activeFile) {
-            setCopyFileName(buildCopyTargetStem(activeFile));
-            setRenameFileName(formatPathDisplayName(activeFile));
-        }
-    }, [pathsList?.active_file]);
-
-    useEffect(() => {
         if (!autosavePendingRef.current || autosaveTick === 0) {
             return;
         }
@@ -406,6 +382,17 @@ export function PathsPage() {
     function scheduleAutosave() {
         autosavePendingRef.current = true;
         setAutosaveTick((value) => value + 1);
+    }
+
+    async function flushAutosave() {
+        if (autosaveTimerRef.current != null) {
+            window.clearTimeout(autosaveTimerRef.current);
+            autosaveTimerRef.current = null;
+        }
+        if (autosavePendingRef.current) {
+            autosavePendingRef.current = false;
+            await persistDocument({ silent: true });
+        }
     }
 
     function handleSafeRoutesChange(nextRoutes: boolean[][]) {
@@ -579,27 +566,6 @@ export function PathsPage() {
         setSuccess(t.pathsPage.optimizeSuccess);
     }
 
-    async function handleSelectFile(filename: string) {
-        if (!filename || isLocked) {
-            return;
-        }
-
-        try {
-            setSelecting(true);
-            setActionError(null);
-            setSuccess(null);
-            history.clear();
-            const data = await selectPath(filename);
-            applyActivePath(data);
-            setPathsList((prev) => (prev ? { ...prev, active_file: data.filename } : prev));
-        } catch (err) {
-            const message = err instanceof Error ? err.message : t.pathsPage.selectError;
-            setActionError(message);
-        } finally {
-            setSelecting(false);
-        }
-    }
-
     async function handleSave() {
         if (isLocked || hasValidationErrors()) {
             if (hasValidationErrors()) {
@@ -676,19 +642,29 @@ export function PathsPage() {
                 setActionError(t.pathsPage.touchUpNoData);
                 return;
             }
-            updatePointsCatalog(
-                updatePointById(points, point.id, {
-                    axes: {
-                        J1: axis.a1!,
-                        J2: axis.a2!,
-                        J3: axis.a3!,
-                        J4: axis.a4!,
-                        J5: axis.a5!,
-                        J6: axis.a6!,
-                    },
-                }),
-                { history: false, autosave: true },
+            const nextPoints = updatePointById(points, point.id, {
+                axes: {
+                    J1: axis.a1!,
+                    J2: axis.a2!,
+                    J3: axis.a3!,
+                    J4: axis.a4!,
+                    J5: axis.a5!,
+                    J6: axis.a6!,
+                },
+            });
+            updatePointsCatalog(nextPoints, { history: false, autosave: false });
+            const touchUpDocument = buildDocumentState(
+                nextPoints,
+                nodes,
+                safeRouteIds,
+                safeRoutes,
+                perPointExposure,
+                perPointMarkerExposure,
+                uniformAdvancedScanRotations,
+                uniformAdvancedScanCount,
             );
+            await persistDocument({ silent: true, document: touchUpDocument });
+            lastTouchUpPointIdRef.current = point.id;
             setSuccess(
                 axis.connected ? t.pathsPage.touchUpSuccess : t.pathsPage.touchUpStaleSuccess,
             );
@@ -797,123 +773,6 @@ export function PathsPage() {
         }
     }
 
-    function resolveFilenameInput(raw: string): string | null {
-        const error = validatePathBasename(raw);
-        if (error) {
-            return null;
-        }
-        return ensureJsonExtension(raw);
-    }
-
-    async function handleCreateFile() {
-        const validation = validatePathBasename(newFileName);
-        if (validation) {
-            setNewFileNameError(t.pathsPage.invalidFileNameError);
-            return;
-        }
-        setNewFileNameError(null);
-        const targetFilename = resolveFilenameInput(newFileName);
-        if (!targetFilename || isLocked) {
-            return;
-        }
-        try {
-            setCreating(true);
-            history.clear();
-            await createPath(targetFilename);
-            await loadPaths();
-            await handleSelectFile(targetFilename);
-            setSuccess(t.pathsPage.createFileSuccess);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : t.pathsPage.createFileError;
-            setActionError(message.toLowerCase().includes("already exists") ? t.pathsPage.createFileExists : message);
-        } finally {
-            setCreating(false);
-        }
-    }
-
-    async function handleCopyFile() {
-        const activeFile = pathsList?.active_file;
-        const validation = validatePathBasename(copyFileName);
-        if (validation) {
-            setCopyFileNameError(t.pathsPage.invalidFileNameError);
-            return;
-        }
-        setCopyFileNameError(null);
-        const targetFilename = resolveFilenameInput(copyFileName);
-        if (!activeFile || !targetFilename || isLocked) {
-            return;
-        }
-        try {
-            setCopying(true);
-            await copyPath(activeFile, targetFilename);
-            await loadPaths();
-            setSuccess(t.pathsPage.copyFileSuccess);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : t.pathsPage.copyFileError;
-            setActionError(message.toLowerCase().includes("already exists") ? t.pathsPage.copyFileExists : message);
-        } finally {
-            setCopying(false);
-        }
-    }
-
-    async function handleDeleteFile() {
-        const activeFile = pathsList?.active_file;
-        if (!activeFile || isLocked) {
-            return;
-        }
-        if (!window.confirm(t.pathsPage.deleteConfirm)) {
-            return;
-        }
-
-        try {
-            setDeleting(true);
-            setActionError(null);
-            setSuccess(null);
-            await deletePath(activeFile);
-            history.clear();
-            await loadPaths();
-            await applyActivePath(await fetchActivePath());
-            setSuccess(t.pathsPage.deleteSuccess);
-        } catch (err) {
-            setActionError(err instanceof Error ? err.message : t.pathsPage.deleteError);
-        } finally {
-            setDeleting(false);
-        }
-    }
-
-    async function handleRenameFile() {
-        const activeFile = pathsList?.active_file;
-        const validation = validatePathBasename(renameFileName);
-        if (validation) {
-            setRenameFileNameError(t.pathsPage.invalidFileNameError);
-            return;
-        }
-        setRenameFileNameError(null);
-        const targetFilename = resolveFilenameInput(renameFileName);
-        if (!activeFile || !targetFilename || isLocked) {
-            return;
-        }
-        if (targetFilename === activeFile) {
-            return;
-        }
-
-        try {
-            setRenaming(true);
-            setActionError(null);
-            setSuccess(null);
-            await renamePath(activeFile, targetFilename);
-            await loadPaths();
-            await applyActivePath(await fetchActivePath());
-            setRenameFileName(formatPathDisplayName(targetFilename));
-            setSuccess(t.pathsPage.renameSuccess);
-        } catch (err) {
-            const message = err instanceof Error ? err.message : t.pathsPage.renameError;
-            setActionError(message.toLowerCase().includes("already exists") ? t.pathsPage.renameExists : message);
-        } finally {
-            setRenaming(false);
-        }
-    }
-
     function formatTravelError(message: string): string {
         const lower = message.toLowerCase();
         if (lower.includes("not at a known position")) {
@@ -937,8 +796,11 @@ export function PathsPage() {
             setMovingIndex(index);
             setActionError(null);
             setTravelSteps([]);
+            await flushAutosave();
             const document = buildCurrentDocument();
-            const result = await moveToPathPosition(index, document, nodeId);
+            const startPointId = lastTouchUpPointIdRef.current ?? undefined;
+            const result = await moveToPathPosition(index, document, nodeId, startPointId);
+            lastTouchUpPointIdRef.current = null;
             setTravelSteps(result.travel_steps ?? []);
             if (result.hops_executed > 1) {
                 setSuccess(`${t.pathsPage.travelRouteSuccess}: ${result.route.join(" → ")}`);
@@ -966,6 +828,9 @@ export function PathsPage() {
                 {actionError && <div className="error-text">{actionError}</div>}
                 {success && <div className="accent-text">{success}</div>}
                 {isLocked && <div className="paths-locked-banner">{t.pathsPage.lockedWhileRunning}</div>}
+                {!activeProjectName && (
+                    <div className="paths-folder-hint">{t.pathsPage.projectRequiredHint}</div>
+                )}
 
                 <div className="paths-toolbar">
                     <div className="paths-meta">
@@ -981,22 +846,6 @@ export function PathsPage() {
                         <button type="button" className="nav-btn" disabled={isLocked || savingFolder || !pathsFolderInput.trim()} onClick={() => void handleSaveFolder()}>{t.pathsPage.saveFolder}</button>
                     </div>
                     {isLocalServer && <div className="paths-folder-hint">{t.pathsPage.browseFolderHint}</div>}
-                    <div className="paths-toolbar-row">
-                        <label className="form-field paths-file-select"><span>{t.pathsPage.selectFile}</span><select value={pathsList?.active_file ?? ""} disabled={isLocked || selecting || !pathsList?.files.length} onChange={(e) => void handleSelectFile(e.target.value)}>{!pathsList?.files.length ? <option value="">{t.pathsPage.noFiles}</option> : pathsList.files.map((file) => (<option key={file.name} value={file.name}>{formatPathDisplayName(file.name)}{file.source_position_count != null ? ` (${file.source_position_count})` : ""}</option>))}</select></label>
-                        <button type="button" className="nav-btn" disabled={isLocked || deleting || renaming || !pathsList?.active_file} onClick={() => void handleDeleteFile()}>{t.pathsPage.deleteFile}</button>
-                    </div>
-                    <div className="paths-toolbar-row">
-                        <label className="form-field paths-file-name-field"><span>{t.pathsPage.renameFileName}</span><input type="text" value={renameFileName} disabled={isLocked || renaming || !pathsList?.active_file} onChange={(e) => { setRenameFileName(e.target.value); setRenameFileNameError(null); }} onBlur={() => { if (validatePathBasename(renameFileName)) setRenameFileNameError(t.pathsPage.invalidFileNameError); }} />{renameFileNameError && <div className="field-error-text">{renameFileNameError}</div>}</label>
-                        <button type="button" className="nav-btn" disabled={isLocked || renaming || !pathsList?.active_file || !renameFileName.trim()} onClick={() => void handleRenameFile()}>{t.pathsPage.renameFile}</button>
-                    </div>
-                    <div className="paths-toolbar-row">
-                        <label className="form-field paths-file-name-field"><span>{t.pathsPage.newFileName}</span><input type="text" value={newFileName} disabled={isLocked || creating} onChange={(e) => { setNewFileName(e.target.value); setNewFileNameError(null); }} onBlur={() => { if (validatePathBasename(newFileName)) setNewFileNameError(t.pathsPage.invalidFileNameError); }} />{newFileNameError && <div className="field-error-text">{newFileNameError}</div>}</label>
-                        <button type="button" className="nav-btn" disabled={isLocked || creating || !newFileName.trim()} onClick={() => void handleCreateFile()}>{t.pathsPage.createFile}</button>
-                    </div>
-                    <div className="paths-toolbar-row">
-                        <label className="form-field paths-file-name-field"><span>{t.pathsPage.copyFileName}</span><input type="text" value={copyFileName} disabled={isLocked || copying || !pathsList?.active_file} onChange={(e) => { setCopyFileName(e.target.value); setCopyFileNameError(null); }} onBlur={() => { if (validatePathBasename(copyFileName)) setCopyFileNameError(t.pathsPage.invalidFileNameError); }} />{copyFileNameError && <div className="field-error-text">{copyFileNameError}</div>}</label>
-                        <button type="button" className="nav-btn" disabled={isLocked || copying || !pathsList?.active_file || !copyFileName.trim()} onClick={() => void handleCopyFile()}>{t.pathsPage.copyFile}</button>
-                    </div>
                 </div>
 
                 {manualExposureMode && (
@@ -1113,9 +962,9 @@ export function PathsPage() {
                     <button type="button" className="nav-btn" disabled={isLocked} onClick={handleAddPoint}>{t.pathsPage.addPoint}</button>
                     <button type="button" className="nav-btn" disabled={isLocked || points.length === 0} onClick={handleAddNode}>{t.pathsPage.addNode}</button>
                     <button type="button" className="nav-btn" disabled={isLocked || points.length === 0} onClick={handleGenerateNodes}>{t.pathsPage.generateNodes}</button>
-                    <button type="button" className="nav-btn" disabled={loading || reloading || saving || selecting} onClick={() => void reloadAll()}>{reloading ? t.dashboard.loading : t.pathsPage.reload}</button>
+                    <button type="button" className="nav-btn" disabled={loading || reloading || saving} onClick={() => void reloadAll()}>{reloading ? t.dashboard.loading : t.pathsPage.reload}</button>
                     <button type="button" className="nav-btn" disabled={isLocked || !nodes.length} onClick={handleOptimize}>{t.pathsPage.optimize}</button>
-                    <button type="button" className="nav-btn active" disabled={isLocked || saving || selecting || !nodes.length || hasValidationErrors()} onClick={() => void handleSave()}>{t.pathsPage.save}</button>
+                    <button type="button" className="nav-btn active" disabled={isLocked || saving || !nodes.length || hasValidationErrors()} onClick={() => void handleSave()}>{t.pathsPage.save}</button>
                 </div>
             </div>
         </div>

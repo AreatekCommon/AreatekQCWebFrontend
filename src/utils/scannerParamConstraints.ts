@@ -7,6 +7,7 @@ import {
 export const WORK_RANGE_SMALL = 0;
 export const WORK_RANGE_LARGE = 1;
 export const ALIGN_MOD_GLOBAL_MARKER = 8;
+export const ALIGN_MOD_MARKER = 4;
 
 export const RESOLUTION_LOW = 1;
 export const RESOLUTION_MID = 2;
@@ -88,15 +89,32 @@ export function applyScanTargetMode(
         };
     }
 
+    const leavingMarkers = scan.scan_markers && !scan.scan_point_cloud;
     return {
         ...scan,
         scan_markers: false,
         scan_point_cloud: true,
+        align_mod: leavingMarkers ? ALIGN_MOD_MARKER : scan.align_mod,
     };
 }
 
 export function isMarkersOnlyScanMode(scan: ScannerScanParams): boolean {
     return scan.scan_markers && !scan.scan_point_cloud;
+}
+
+export function applyPointCloudScannerSettings(scanner: ScannerSettings): ScannerSettings {
+    if (isMarkersOnlyScanMode(scanner.scan)) {
+        return scanner;
+    }
+
+    if (scanner.save_type === "p3") {
+        return {
+            ...scanner,
+            save_type: "stl",
+        };
+    }
+
+    return scanner;
 }
 
 export function applyMarkersOnlyScannerSettings(scanner: ScannerSettings): ScannerSettings {
@@ -123,10 +141,11 @@ export function normalizeScannerSettings(scanner: ScannerSettings): ScannerSetti
     const scanWithRadius = { ...scanner.scan, marker_radius };
     const scan = normalizeScanTarget(scanWithRadius);
 
-    return applyMarkersOnlyScannerSettings({
-        ...scanner,
-        scan,
-    });
+    const withScanTarget = isMarkersOnlyScanMode(scan)
+        ? applyMarkersOnlyScannerSettings({ ...scanner, scan })
+        : applyPointCloudScannerSettings({ ...scanner, scan });
+
+    return withScanTarget;
 }
 
 export function applyMarkersOnlyRuntimeSettings(settings: RuntimeSettings): RuntimeSettings {

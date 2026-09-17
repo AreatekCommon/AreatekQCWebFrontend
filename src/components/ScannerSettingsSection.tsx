@@ -182,7 +182,7 @@ export function ScannerSettingsSection({
         : ALIGN_MOD_OPTIONS;
     const saveTypeOptions = markersOnlyMode
         ? SAVE_TYPE_OPTIONS.filter((option) => option.value === "p3")
-        : SAVE_TYPE_OPTIONS;
+        : SAVE_TYPE_OPTIONS.filter((option) => option.value !== "p3");
 
     return (
         <>
@@ -204,8 +204,12 @@ export function ScannerSettingsSection({
                     label={sp.fields.exportRoot}
                     value={scanner.export_root}
                     mode="folder"
+                    disabled={markersOnlyMode}
                     onChange={(value) => setScanner({ ...scanner, export_root: value })}
                 />
+                {markersOnlyMode && (
+                    <p className="settings-section-hint">{sp.fields.markersOnlyExportRootHint}</p>
+                )}
                 <EnumSelectField
                     label={sp.fields.workRange}
                     value={scanner.work_range}

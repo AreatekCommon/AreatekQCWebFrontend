@@ -402,6 +402,36 @@ export type ProjectSaveRequest = {
     settings: RuntimeSettings;
 };
 
+export type ProjectFromTrajectoryRequest = {
+    filename: string;
+    overwrite: boolean;
+};
+
+export type ProjectFromTrajectoryResponse = {
+    name: string;
+    path: string;
+    trajectory_file: string;
+};
+
+export type ProjectCreateRequest = {
+    name: string;
+    overwrite: boolean;
+};
+
+export type ProjectCreateResponse = {
+    name: string;
+    path: string;
+    trajectory_file: string;
+};
+
+export type ProjectDeleteRequest = {
+    delete_trajectory: boolean;
+};
+
+export type ProjectRenameRequest = {
+    new_name: string;
+};
+
 export type ProjectSaveResponse = {
     name: string;
     path: string;

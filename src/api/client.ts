@@ -11,6 +11,12 @@ import type {
     ProjectExistsResponse,
     ProjectListResponse,
     ProjectLoadResponse,
+    ProjectFromTrajectoryRequest,
+    ProjectFromTrajectoryResponse,
+    ProjectCreateRequest,
+    ProjectCreateResponse,
+    ProjectDeleteRequest,
+    ProjectRenameRequest,
     ProjectSaveRequest,
     ProjectSaveResponse,
     ActiveProjectResponse,
@@ -369,6 +375,7 @@ export async function moveToPathPosition(
     positionIndex: number,
     document: PathDocument,
     nodeId?: string,
+    startPointId?: string,
 ): Promise<PathMoveToResponse> {
     const response = await fetch(`${API_BASE_URL}/paths/active/move-to`, {
         method: "POST",
@@ -377,6 +384,7 @@ export async function moveToPathPosition(
             position_index: positionIndex,
             node_id: nodeId ?? null,
             document,
+            start_point_id: startPointId ?? null,
         }),
     });
 
@@ -432,6 +440,85 @@ export async function saveProject(payload: ProjectSaveRequest): Promise<ProjectS
             throw new Error(body?.detail ?? "Project already exists");
         }
         throw new Error(body?.detail ?? `Project save failed: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+export async function createProject(
+    payload: ProjectCreateRequest,
+): Promise<ProjectCreateResponse> {
+    const response = await fetch(`${API_BASE_URL}/projects/create`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+        if (response.status === 409) {
+            throw new Error(body?.detail ?? "Project already exists");
+        }
+        throw new Error(body?.detail ?? `Project create failed: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+export async function deleteProject(
+    name: string,
+    payload: ProjectDeleteRequest,
+): Promise<{ status: string; name: string }> {
+    const response = await fetch(`${API_BASE_URL}/projects/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(body?.detail ?? `Project delete failed: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+export async function renameProject(
+    name: string,
+    payload: ProjectRenameRequest,
+): Promise<ProjectCreateResponse> {
+    const response = await fetch(
+        `${API_BASE_URL}/projects/${encodeURIComponent(name)}/rename`,
+        {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+        },
+    );
+
+    if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+        throw new Error(body?.detail ?? `Project rename failed: ${response.status}`);
+    }
+
+    return response.json();
+}
+
+export async function createProjectFromTrajectory(
+    payload: ProjectFromTrajectoryRequest,
+): Promise<ProjectFromTrajectoryResponse> {
+    const response = await fetch(`${API_BASE_URL}/projects/from-trajectory`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+    });
+
+    if (!response.ok) {
+        const body = (await response.json().catch(() => null)) as { detail?: string } | null;
+        if (response.status === 409) {
+            throw new Error(body?.detail ?? "Project already exists");
+        }
+        throw new Error(body?.detail ?? `Project create failed: ${response.status}`);
     }
 
     return response.json();
